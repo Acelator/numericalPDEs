@@ -1,8 +1,15 @@
 # Agents definition files
 .opencode/**
 
-# Build files
-build/**
+# Build files (cmake out-of-source output)
+build/
+**/bin/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
 
 # out files
-out.csv
+**/out.csv
+
+# IDE config
+.vscode/**

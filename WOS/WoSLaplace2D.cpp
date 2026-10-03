@@ -5,52 +5,30 @@
 // Sawhney & Crane, "Monte Carlo Geometry Processing" (2020).
 // To compile: c++ -std=c++20 -O3 -fopenmp -pedantic -Wall main.cpp -o wos
 
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <complex>
 #include <functional>
 #include <iostream>
 #include <random>
 #include <vector>
 #include <limits>
-#include <numbers>
 #include <fstream>
 #include <omp.h>
 using namespace std;
 
-auto pi = std::numbers::pi;
+#include "WoSLaplace2D.h"
 
 // thread_local std::mt19937 rng{std::random_device{}()};
-thread_local std::mt19937 rng{123456 + 7919u * (unsigned)omp_get_thread_num()};
-
-// use std::complex to implement 2D vectors
-using Vec2D = complex<float>;
-float dot(Vec2D u, Vec2D v) { return real(conj(u) * v); }
-float length(Vec2D u) { return sqrt(norm(u)); }
-
-// a segment is just a pair of points
-using Segment = array<Vec2D, 2>;
-
-// returns the point on segment s closest to x
-Vec2D closestPoint(const Vec2D &x, const Segment &s)
-{
-    Vec2D u = s[1] - s[0];
-    float t = clamp(dot(x - s[0], u) / dot(u, u), 0.f, 1.f);
-    return (1 - t) * s[0] + t * s[1];
-}
+static thread_local std::mt19937 rng{123456 + 7919u * (unsigned)omp_get_thread_num()};
 
 // returns a random value in the range [rMin,rMax]
-float random(float rMin, float rMax)
+static float random(float rMin, float rMax)
 {
     std::uniform_real_distribution<float> d(rMin, rMax);
     return d(rng);
 }
 
 // solves a Laplace equation Δu = 0 at x0, where the boundary is given
-// by a collection of segments, and the boundary conditions are given
-// by a function g that can be evaluated at any point in space
-float solve(const Vec2D &x0, const vector<Segment> &segments, const function<float(Vec2D)> &g)
+// and the boundary conditions are given by a function g that can be evaluated at any point in space.
+float solve(const Vec2D &x0, const Domain &dom, const function<float(Vec2D)> &g)
 {
     const float eps = 0.01;  // stopping tolerance
     const int nWalks = 256;  // number of Monte Carlo samples
@@ -64,12 +42,7 @@ float solve(const Vec2D &x0, const vector<Segment> &segments, const function<flo
         int steps = 0;
         do
         {
-            R = numeric_limits<float>::max();
-            for (const auto &s : segments)
-            {
-                Vec2D p = closestPoint(x, s);
-                R = min(R, length(x - p));
-            }
+            R = dom.distanceBoundary(x);
             float theta = random(0., 2. * pi);
             x = x + Vec2D(R * cos(theta), R * sin(theta)); // Point sampled in the new sphere with radius R around x
             steps++;
@@ -86,14 +59,15 @@ float checker(Vec2D x)
     return fmod(floor(s * real(x)) + floor(s * imag(x)), 2.);
 }
 
-vector<Segment> scene = {
+static vector<Segment> scene = {
     {{Vec2D(0.5, 0.1), Vec2D(0.9, 0.5)}},
     {{Vec2D(0.5, 0.9), Vec2D(0.1, 0.5)}},
     {{Vec2D(0.1, 0.5), Vec2D(0.5, 0.1)}},
     {{Vec2D(0.5, 0.33333333), Vec2D(0.5, 0.6666666)}},
     {{Vec2D(0.33333333, 0.5), Vec2D(0.6666666, 0.5)}}};
 
-int main(int argc, char **argv)
+// Solves and store the solution to a file
+void laplace()
 {
     bool save = true;
 
@@ -104,11 +78,15 @@ int main(int argc, char **argv)
         if (!out)
         {
             std::cerr << "failed to open out.csv\n";
-            return 1;
+            // return 1;
         }
     }
 
     const int s = 128; // image size
+
+    auto circles = std::vector<Circle>{};
+    auto arcs = std::vector<Arc>{};
+    Domain domain = Domain(scene, circles, arcs);
     std::array<float, s * s> solution{};
     float error{};
 
@@ -119,7 +97,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < s; i++)
         {
             Vec2D x0((float)i / (float)s, (float)j / (float)s);
-            float u = solve(x0, scene, checker);
+            float u = solve(x0, domain, checker);
             if (save)
                 solution[j * s + i] = u;
 
@@ -143,6 +121,5 @@ int main(int argc, char **argv)
     }
 
     // std::cout << "The error against the solution is: " << sqrt(error) << std::endl;
-
-    return 0;
+    // return 0;
 }

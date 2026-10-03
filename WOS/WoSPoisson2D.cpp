@@ -5,43 +5,20 @@
 // Corresponds to the naïve estimator given in Equation 8 of
 // Sawhney & Crane, "Monte Carlo Geometry Processing" (2020).
 // To compile: c++ -std=c++20 -fopenmp -O3 -pedantic -Wall main.cpp -o poisson
-#include <algorithm>
-#include <array>
-#include <math.h>
-#include <complex>
 #include <functional>
 #include <iostream>
 #include <random>
-#include <numbers>
 #include <vector>
 #include <fstream>
 #include <omp.h>
 
+#include "helpers/geometry.h"
 using namespace std;
 
-auto pi = std::numbers::pi;
-
-long unsigned int seed{1234567 + 7919u * (unsigned)omp_get_thread_num()};
 // thread_local std::mt19937 rng{std::random_device{}()};
-thread_local std::mt19937 rng{seed};
+static thread_local std::mt19937 rng{1234567 + 7919u * (unsigned)omp_get_thread_num()};
 
-// use std::complex to implement 2D vectors
-using Vec2D = complex<float>;
-float dot(Vec2D u, Vec2D v) { return real(conj(u) * v); }
-float length(Vec2D u) { return sqrt(norm(u)); }
-
-// a segment is just a pair of points
-using Segment = array<Vec2D, 2>;
-
-// returns the point on segment s closest to x
-Vec2D closestPoint(Vec2D x, Segment s)
-{
-    Vec2D u = s[1] - s[0];
-    float t = clamp(dot(x - s[0], u) / dot(u, u), 0.f, 1.f);
-    return (1 - t) * s[0] + t * s[1];
-}
-
-float random(float rMin, float rMax)
+static float random(float rMin, float rMax)
 {
     std::uniform_real_distribution<float> d(rMin, rMax);
     return d(rng);
@@ -60,7 +37,7 @@ float G(float r, float R)
 // by a collection of segments, and the boundary conditions are given
 // by a function g that can be evaluated at any point in space
 float solve(Vec2D x0,                        // evaluation point
-            const vector<Segment> &segments, // geometry
+            const Domain &dom,               // Domain where the edp is defined
             const function<float(Vec2D)> &f, // source term
             const function<float(Vec2D)> &g  // boundary conditions
 )
@@ -77,14 +54,7 @@ float solve(Vec2D x0,                        // evaluation point
         int steps = 0;
         do
         {
-
-            // get the distance to the closest point on any segment
-            R = numeric_limits<float>::max();
-            for (const auto &s : segments)
-            {
-                Vec2D p = closestPoint(x, s);
-                R = min(R, length(x - p));
-            }
+            R = dom.distanceBoundary(x);
 
             // sample a point y uniformly from the ball of radius R around x
             float r = R * sqrt(random(0., 1.));
@@ -118,13 +88,13 @@ float laplace_uref(Vec2D x)
 }
 
 // four segments enclosing the unit square
-vector<Segment> scene = {
+static vector<Segment> scene = {
     {{Vec2D(0.0, 0.0), Vec2D(1.0, 0.0)}},
     {{Vec2D(1.0, 0.0), Vec2D(1.0, 1.0)}},
     {{Vec2D(1.0, 1.0), Vec2D(0.0, 1.0)}},
     {{Vec2D(0.0, 1.0), Vec2D(0.0, 0.0)}}};
 
-int main(int argc, char **argv)
+void poisson()
 {
     bool save = false;
 
@@ -135,7 +105,7 @@ int main(int argc, char **argv)
         if (!out)
         {
             std::cerr << "failed to open out.csv\n";
-            return 1;
+            // return 1;
         }
     }
     // To validate the implementation we solve the Poisson equation
@@ -145,6 +115,11 @@ int main(int argc, char **argv)
     //
     // where u0 is some reference function.  The solution should
     // converge to u = u0 as the number of samples N increases.
+
+    // Should we explicity call new?
+    auto circles = std::vector<Circle>{};
+    auto arcs = std::vector<Arc>{};
+    Domain domain = Domain(scene, circles, arcs);
 
     float error{};
 
@@ -158,7 +133,7 @@ int main(int argc, char **argv)
         for (int i = 0; i < s; i++)
         {
             Vec2D x0((float)i / (float)s, (float)j / (float)s);
-            float u = solve(x0, scene, laplace_uref, uref);
+            float u = solve(x0, domain, laplace_uref, uref);
             if (save)
                 solution[j * s + i] = u;
 
@@ -183,5 +158,5 @@ int main(int argc, char **argv)
 
     std::cout << "The error against the solution is: " << sqrt(error / (s * s)) << std::endl;
 
-    return 0;
+    // return 0;
 }
