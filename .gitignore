@@ -1,3 +1,8 @@
-
 # Agents definition files
 .opencode/**
+
+# Build files
+build/**
+
+# out files
+out.csv
